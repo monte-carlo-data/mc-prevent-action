@@ -1,0 +1,113 @@
+name: "Monte Carlo Safety Gate"
+description: "Run Monte Carlo's CI Safety Gate to assess risk of data pipeline changes before merge."
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  mc-api-key:
+    description: "Monte Carlo API key for authentication."
+    required: true
+  api-url:
+    description: "Monte Carlo CI Gate API URL."
+    required: false
+    default: "https://api.getmontecarlo.com/ci/assess"
+  fail-on-error:
+    description: "Whether to fail the step if the gate returns 'fail'. Set to 'false' to always pass."
+    required: false
+    default: "true"
+
+outputs:
+  conclusion:
+    description: "Gate verdict: pass, warn, or fail."
+    value: ${{ steps.gate.outputs.conclusion }}
+  risk-tier:
+    description: "Risk tier from the assessment: high, medium, low, or none."
+    value: ${{ steps.gate.outputs.risk_tier }}
+  assessment-source:
+    description: "Source of the assessment: pr_agent, override, none, or error."
+    value: ${{ steps.gate.outputs.assessment_source }}
+  response:
+    description: "Full JSON response from the CI Gate API."
+    value: ${{ steps.gate.outputs.response }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Monte Carlo Safety Gate
+      id: gate
+      shell: bash
+      env:
+        MC_API_KEY: ${{ inputs.mc-api-key }}
+        API_URL: ${{ inputs.api-url }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        # Validate required context
+        if [ -z "${{ github.event.pull_request.number }}" ]; then
+          echo "::warning::Not a pull request event. Skipping safety gate."
+          echo "conclusion=pass" >> "$GITHUB_OUTPUT"
+          echo "risk_tier=none" >> "$GITHUB_OUTPUT"
+          echo "assessment_source=skipped" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
+          -H "Authorization: Bearer $MC_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "repository": "${{ github.repository }}",
+            "pr_number": ${{ github.event.pull_request.number }},
+            "commit_sha": "${{ github.event.pull_request.head.sha }}"
+          }')
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        # Set outputs
+        CONCLUSION=$(echo "$BODY" | jq -r '.conclusion // "error"')
+        RISK_TIER=$(echo "$BODY" | jq -r '.risk_tier // "none"')
+        ASSESSMENT_SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "error"')
+
+        echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+        echo "risk_tier=$RISK_TIER" >> "$GITHUB_OUTPUT"
+        echo "assessment_source=$ASSESSMENT_SOURCE" >> "$GITHUB_OUTPUT"
+        {
+          echo 'response<<EOF'
+          echo "$BODY"
+          echo 'EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        # Log result
+        echo "::group::MC Safety Gate Result"
+        echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+        echo "::endgroup::"
+
+        if [ "$HTTP_CODE" -ge 400 ]; then
+          echo "::warning::CI Gate API returned HTTP $HTTP_CODE"
+        fi
+
+        # Summary
+        SUMMARY=$(echo "$BODY" | jq -r '.summary // ""')
+        OVERRIDE=$(echo "$BODY" | jq -r '.override_active // false')
+
+        if [ "$CONCLUSION" = "pass" ]; then
+          echo "### :white_check_mark: MC Safety Gate — Passed" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$CONCLUSION" = "warn" ]; then
+          echo "### :warning: MC Safety Gate — Warning" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$CONCLUSION" = "fail" ]; then
+          echo "### :x: MC Safety Gate — Failed" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "**Risk:** $RISK_TIER | $SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$OVERRIDE" = "true" ]; then
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> :warning: Override active via \`mc-override\` label." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # Exit code
+        if [ "$CONCLUSION" = "fail" ] && [ "$FAIL_ON_ERROR" = "true" ]; then
+          echo "::error::MC Safety Gate failed. Add 'mc-override' label to bypass."
+          exit 1
+        fi
