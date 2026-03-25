@@ -18,7 +18,8 @@ jobs:
     steps:
       - uses: monte-carlo-data/mcd-ci-gate-agent@v1
         with:
-          mc-api-key: ${{ secrets.MC_API_KEY }}
+          mcd-id: ${{ secrets.MCD_ID }}
+          mcd-token: ${{ secrets.MCD_TOKEN }}
 ```
 
 ## How It Works
@@ -33,7 +34,8 @@ jobs:
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `mc-api-key` | Yes | — | Monte Carlo API key |
+| `mcd-id` | Yes | — | Monte Carlo API Key ID |
+| `mcd-token` | Yes | — | Monte Carlo API Key Token |
 | `api-url` | No | `https://api.getmontecarlo.com/ci/assess` | API endpoint URL |
 | `fail-on-error` | No | `true` | Set to `false` to never fail the step |
 
@@ -52,7 +54,8 @@ jobs:
 - uses: monte-carlo-data/mcd-ci-gate-agent@v1
   id: gate
   with:
-    mc-api-key: ${{ secrets.MC_API_KEY }}
+    mcd-id: ${{ secrets.MCD_ID }}
+    mcd-token: ${{ secrets.MCD_TOKEN }}
 
 - run: echo "Risk tier is ${{ steps.gate.outputs.risk-tier }}"
 ```
@@ -72,7 +75,7 @@ Configured per account in Monte Carlo:
 
 ## Setup
 
-1. Get your Monte Carlo API key
-2. Add it as a repository secret named `MC_API_KEY`
+1. Create an API key in Monte Carlo (Settings > API Keys > Create Key)
+2. Add `MCD_ID` and `MCD_TOKEN` as repository secrets in your GitHub repo
 3. Add the workflow file above
 4. Open a PR — the safety gate runs automatically
