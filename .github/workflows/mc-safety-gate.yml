@@ -1,0 +1,15 @@
+name: MC Safety Gate
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  safety-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: monte-carlo-data/mcd-ci-gate-agent@main
+        with:
+          mcd-id: ${{ secrets.MCD_ID }}
+          mcd-token: ${{ secrets.MCD_TOKEN }}
+          api-url: "https://graphql.dev.mcinfra.io/ci/assess"
