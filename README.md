@@ -1,4 +1,4 @@
-This is a test of the workflow
+## This is a test of the workflow
 
 # Monte Carlo Safety Gate
 
