@@ -12,4 +12,4 @@ jobs:
         with:
           mcd-id: ${{ secrets.MCD_ID }}
           mcd-token: ${{ secrets.MCD_TOKEN }}
-          api-url: "https://graphql.dev.mcinfra.io/ci/assess"
+          api-url: "https://api.dev.getmontecarlo.com/ci/assess"
