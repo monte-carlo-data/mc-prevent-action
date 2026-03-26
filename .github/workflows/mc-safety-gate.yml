@@ -3,11 +3,30 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  checks: write
+
 jobs:
   safety-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Mock the PR Agent Check Run so the CI gate finds an assessment
+      - name: Create mock PR Agent Check Run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/check-runs \
+            -X POST \
+            -f name="Monte Carlo Safety Check" \
+            -f head_sha="${{ github.event.pull_request.head.sha }}" \
+            -f status="completed" \
+            -f conclusion="success" \
+            -f "output[title]=Risk Assessment" \
+            -f "output[summary]=Found high risk changes in dbt models" \
+            -f 'output[text]={"risk_tier": "high", "summary": "Mock: 3 high-risk dbt model changes detected affecting critical revenue pipeline tables."}'
+
       - uses: monte-carlo-data/mcd-ci-gate-agent@main
         with:
           mcd-id: ${{ secrets.MCD_ID }}
