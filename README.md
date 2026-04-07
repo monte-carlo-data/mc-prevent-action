@@ -106,6 +106,34 @@ MC Prevent returns one of three verdicts based on the risk assessment:
 
 **Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual severity — green for pass, grey for warn, red for fail. If you configure branch protection, require the check run (not the CI job) for accurate gating.
 
+### How the verdict is calculated
+
+MC Prevent receives a risk assessment from the MC PR Agent for each data asset affected by the PR. It evaluates each asset against a decision matrix and takes the worst verdict across all assets.
+
+**Decision matrix** — rules are evaluated top-to-bottom, first match wins:
+
+| # | Condition | Verdict |
+|---|-----------|---------|
+| 1 | Breaking change AND downstream key assets depend on it | **fail** |
+| 2 | Active alerts highly correlated with the change | **fail** |
+| 3 | Breaking change AND no key assets downstream | **warn** |
+| 4 | Active alerts exist but low/no correlation with the change | **warn** |
+| 5 | No monitor coverage AND key assets downstream | **warn** |
+| 6 | Additive change, no active alerts | **pass** |
+| 7 | No qualifying data assets identified | **pass** |
+
+**Signals used per asset** — provided by the PR agent:
+
+| Signal | Description |
+|--------|-------------|
+| `change_type` | How the asset is affected: `breaking` or `additive` |
+| `alert_correlation` | Whether active alerts are related to the change: `high`, `low`, or `none` |
+| `active_alerts` | Number of unresolved alerts on the asset |
+| `downstream_key_assets` | Key assets (dashboards, critical tables) that depend on this asset |
+| `monitor_coverage_gaps` | Columns or aspects of the asset that have no monitor coverage |
+
+**Multi-asset PRs:** When a PR affects multiple data assets, each is evaluated independently. The final verdict is the **worst** across all assets — if one asset is `fail` and another is `pass`, the PR verdict is `fail`.
+
 ### What `fail-on-error` controls
 
 | Setting | Behavior |
