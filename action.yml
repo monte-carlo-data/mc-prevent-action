@@ -1,0 +1,226 @@
+name: "MC Prevent"
+description: "Run Monte Carlo's MC Prevent to assess risk of data pipeline changes before merge."
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  mcd-id:
+    description: "Monte Carlo API Key ID (from MC Settings > API Keys)."
+    required: true
+  mcd-token:
+    description: "Monte Carlo API Key Token (from MC Settings > API Keys)."
+    required: true
+  api-url:
+    description: "Monte Carlo MC Prevent API URL."
+    required: false
+    default: "https://api.getmontecarlo.com/ci/assess"
+  fail-on-error:
+    description: >
+      Whether warn and fail verdicts cause the step to exit non-zero.
+      When true (default), warn and fail both show as red in CI.
+      When false, the step always passes — verdict visible in output only.
+    required: false
+    default: "true"
+  poll-interval:
+    description: "Seconds between poll attempts when waiting for PR agent assessment."
+    required: false
+    default: "30"
+  max-wait:
+    description: "Maximum seconds to wait for PR agent assessment before giving up."
+    required: false
+    default: "300"
+
+outputs:
+  conclusion:
+    description: "Gate verdict: pass, warn, or fail."
+    value: ${{ steps.gate.outputs.conclusion }}
+  risk-tier:
+    description: "Risk tier from the assessment: high, medium, low, or none."
+    value: ${{ steps.gate.outputs.risk_tier }}
+  assessment-source:
+    description: "Source of the assessment: pr_agent, override, none, or error."
+    value: ${{ steps.gate.outputs.assessment_source }}
+  response:
+    description: "Full JSON response from the MC Prevent API."
+    value: ${{ steps.gate.outputs.response }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Restore cached verdict
+      uses: actions/cache@v4
+      id: verdict-cache
+      with:
+        path: .mc-prevent-cache
+        key: mc-prevent-${{ github.head_ref }}-${{ github.run_id }}
+        restore-keys: |
+          mc-prevent-${{ github.head_ref }}-
+
+    - name: "\u26a0\ufe0f MC Prevent"
+      id: gate
+      shell: bash
+      env:
+        MCD_ID: ${{ inputs.mcd-id }}
+        MCD_TOKEN: ${{ inputs.mcd-token }}
+        API_URL: ${{ inputs.api-url }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        POLL_INTERVAL: ${{ inputs.poll-interval }}
+        MAX_WAIT: ${{ inputs.max-wait }}
+      run: |
+        # Skip gracefully if credentials not configured
+        if [ -z "$MCD_ID" ] || [ -z "$MCD_TOKEN" ]; then
+          echo "MC Prevent: MCD_ID/MCD_TOKEN not configured. Skipping."
+          echo "conclusion=pass" >> "$GITHUB_OUTPUT"
+          echo "risk_tier=none" >> "$GITHUB_OUTPUT"
+          echo "assessment_source=skipped" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Validate required context
+        if [ -z "${{ github.event.pull_request.number }}" ]; then
+          echo "::warning::Not a pull request event. Skipping MC Prevent."
+          echo "conclusion=pass" >> "$GITHUB_OUTPUT"
+          echo "risk_tier=none" >> "$GITHUB_OUTPUT"
+          echo "assessment_source=skipped" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        REPO="${{ github.repository }}"
+        PR_NUMBER=${{ github.event.pull_request.number }}
+        COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+        CACHE_FILE=".mc-prevent-cache/verdict.json"
+        mkdir -p .mc-prevent-cache
+
+        echo "PR #${PR_NUMBER} on ${REPO} at commit ${COMMIT_SHA}"
+        echo "Retrieving MC Prevent assessment..."
+        sleep ${POLL_INTERVAL}
+        WAITED=${POLL_INTERVAL}
+
+        while true; do
+          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 25 -X POST "$API_URL" \
+            -H "x-mcd-id: $MCD_ID" \
+            -H "x-mcd-token: $MCD_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg repo "$REPO" \
+              --argjson pr "$PR_NUMBER" \
+              --arg sha "$COMMIT_SHA" \
+              '{repository:$repo, pr_number:$pr, commit_sha:$sha}'
+            )" 2>/dev/null) || true
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if ! echo "$BODY" | jq . > /dev/null 2>&1; then
+            BODY=""
+            SOURCE="error"
+          else
+            SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "error"')
+          fi
+
+          # Got a real verdict — save to cache and use it
+          if [ "$SOURCE" != "none" ] && [ "$SOURCE" != "error" ]; then
+            echo "$BODY" > "$CACHE_FILE"
+            break
+          fi
+
+          # No assessment yet — check if we have a cached verdict from a previous run
+          if [ -f "$CACHE_FILE" ]; then
+            echo "Using cached assessment from previous run."
+            BODY=$(cat "$CACHE_FILE")
+            HTTP_CODE=200
+            SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "cached"')
+            break
+          fi
+
+          WAITED=$((WAITED + POLL_INTERVAL))
+          if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+            echo "::warning::No assessment available. Defaulting to pass."
+            break
+          fi
+
+          sleep ${POLL_INTERVAL}
+        done
+
+        # Parse result
+        CONCLUSION=$(echo "$BODY" | jq -r '.conclusion // "error"' 2>/dev/null || echo "error")
+        RISK_TIER=$(echo "$BODY" | jq -r '.risk_tier // "none"' 2>/dev/null || echo "none")
+        HUMAN_SUMMARY=$(echo "$BODY" | jq -r '.human_summary // ""' 2>/dev/null || echo "")
+        SUMMARY=$(echo "$BODY" | jq -r '.summary // ""' 2>/dev/null || echo "")
+        ASSESSMENT_SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "error"' 2>/dev/null || echo "error")
+
+        # Set outputs
+        echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+        echo "risk_tier=$RISK_TIER" >> "$GITHUB_OUTPUT"
+        echo "assessment_source=$ASSESSMENT_SOURCE" >> "$GITHUB_OUTPUT"
+        {
+          echo 'response<<EOF'
+          echo "$BODY"
+          echo 'EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        # Use human_summary if available, otherwise fall back to summary
+        DISPLAY_SUMMARY="${HUMAN_SUMMARY:-$SUMMARY}"
+        # Strip markdown for plain text console output
+        PLAIN_SUMMARY=$(echo "$DISPLAY_SUMMARY" | sed 's/\*\*//g; s/\*//g; s/`//g')
+
+        # --- Console output ---
+        echo ""
+        echo "==========================================="
+        echo " MC Prevent CI Check Result"
+        echo "==========================================="
+        echo ""
+        echo "Conclusion: ${CONCLUSION}"
+        echo "Risk tier:  ${RISK_TIER}"
+        echo ""
+        echo "${PLAIN_SUMMARY}"
+        echo ""
+        echo "==========================================="
+
+        # Collapsible raw JSON
+        echo "::group::Raw API response"
+        echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+        echo "::endgroup::"
+
+        # --- GitHub Step Summary ---
+        if [ "$CONCLUSION" = "pass" ]; then
+          echo "### :white_check_mark: MC Prevent — Passed" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$CONCLUSION" = "warn" ]; then
+          echo "### :warning: MC Prevent — Warning" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$CONCLUSION" = "fail" ]; then
+          echo "### :x: MC Prevent — Failed" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "**Risk tier:** ${RISK_TIER}" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "${DISPLAY_SUMMARY}" >> "$GITHUB_STEP_SUMMARY"
+
+        # Add raw response in collapsible section
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "<details><summary>Raw response</summary>" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo '```json' >> "$GITHUB_STEP_SUMMARY"
+        echo "$BODY" | jq . 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "$BODY" >> "$GITHUB_STEP_SUMMARY"
+        echo '```' >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+
+        OVERRIDE=$(echo "$BODY" | jq -r '.override_active // false' 2>/dev/null || echo "false")
+        if [ "$OVERRIDE" = "true" ]; then
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> :warning: Override active via \`mc-override\` label." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # Exit 1 on warn or fail
+        if [ "$FAIL_ON_ERROR" = "true" ]; then
+          if [ "$CONCLUSION" = "fail" ] || [ "$CONCLUSION" = "warn" ]; then
+            if [ "$CONCLUSION" = "fail" ]; then
+              echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
+            else
+              echo "::error::MC Prevent: WARNING. Review the assessment before merging."
+            fi
+            exit 1
+          fi
+        fi
