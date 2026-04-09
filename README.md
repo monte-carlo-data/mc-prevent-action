@@ -141,9 +141,17 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 | `fail-on-error: true` (default) | Warn and fail both cause the step to exit non-zero (red). This draws attention to risks. |
 | `fail-on-error: false` | The step always passes (green). The verdict is only visible in the job output, step summary, and the check run on the PR. Use this for a silent, non-blocking setup. |
 
-### Missing credentials
+### Behavior by setup stage
 
-If `MCD_ID` or `MCD_TOKEN` are not set, MC Prevent skips silently (step passes). Adding the action before configuring credentials won't break your CI.
+MC Prevent is designed for progressive adoption — it never blocks your CI due to incomplete setup. You can add the workflow file first and configure the remaining pieces at your own pace.
+
+| Setup stage | CI result | What you'll see |
+|---|---|---|
+| Workflow added, secrets not yet configured | Pass (green) | Step skips instantly — no API call is made |
+| Secrets configured, PR agent not yet enabled | Pass (green) | Step polls for up to `max-wait` seconds, then passes with no assessment |
+| Secrets configured, PR agent enabled | Pass / Warn / Fail | Full risk verdict based on the PR agent's analysis |
+
+**Tip:** To avoid the polling wait in stage two, enable the PR agent in **Monte Carlo → Settings → AI Agents** before (or shortly after) adding your API credentials.
 
 ## Override
 
@@ -156,7 +164,7 @@ Add the `mc-override` label to your pull request to bypass MC Prevent.
 ## Troubleshooting
 
 **MC Prevent times out with no assessment:**
-The PR agent posts its assessment when a PR is opened or marked ready for review. If you push additional commits, MC Prevent reuses the cached verdict from the initial assessment. If no assessment exists after `max-wait` seconds, the step exits without blocking.
+The PR agent posts its assessment when a PR is opened or marked ready for review. If you push additional commits, MC Prevent reuses the cached verdict from the initial assessment. If no assessment exists after `max-wait` seconds, the step passes without blocking. This typically means the PR agent is not yet enabled — see the [setup stages](#behavior-by-setup-stage) table above.
 
 **Authentication errors (401):**
 Verify that `MCD_ID` and `MCD_TOKEN` are set correctly as repository secrets.
