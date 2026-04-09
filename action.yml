@@ -1,4 +1,5 @@
 name: "MC Prevent"
+author: "Monte Carlo Data"
 description: "Run Monte Carlo's MC Prevent to assess risk of data pipeline changes before merge."
 branding:
   icon: "shield"
