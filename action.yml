@@ -25,11 +25,11 @@ inputs:
   fail-on:
     description: >
       Which verdicts cause the step to exit non-zero.
-      "all" (default): both warn and fail exit non-zero.
-      "fail": only fail exits non-zero; warnings are informational.
+      "warn_and_fail" (default): both warn and fail exit non-zero.
+      "fail_only": only fail exits non-zero; warnings are informational.
       "none": the step always passes — verdict visible in output only.
     required: false
-    default: "all"
+    default: "warn_and_fail"
   exempt-tables:
     description: >
       Comma-separated list of table names to exclude from the gate
@@ -235,19 +235,19 @@ runs:
         # Resolve effective fail-on mode.
         # fail-on takes precedence; fall back to fail-on-error for backward compat.
         EFFECTIVE_FAIL_ON="$FAIL_ON"
-        if [ -z "$EFFECTIVE_FAIL_ON" ] || [ "$EFFECTIVE_FAIL_ON" = "all" ]; then
+        if [ -z "$EFFECTIVE_FAIL_ON" ] || [ "$EFFECTIVE_FAIL_ON" = "warn_and_fail" ]; then
           # Check legacy param
           if [ "$FAIL_ON_ERROR" = "false" ]; then
             EFFECTIVE_FAIL_ON="none"
           elif [ "$FAIL_ON_ERROR" = "true" ]; then
-            EFFECTIVE_FAIL_ON="all"
+            EFFECTIVE_FAIL_ON="warn_and_fail"
           else
-            EFFECTIVE_FAIL_ON="all"
+            EFFECTIVE_FAIL_ON="warn_and_fail"
           fi
         fi
 
         # Exit non-zero based on fail-on mode
-        if [ "$EFFECTIVE_FAIL_ON" = "all" ]; then
+        if [ "$EFFECTIVE_FAIL_ON" = "warn_and_fail" ]; then
           if [ "$CONCLUSION" = "fail" ] || [ "$CONCLUSION" = "warn" ]; then
             if [ "$CONCLUSION" = "fail" ]; then
               echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
@@ -256,7 +256,7 @@ runs:
             fi
             exit 1
           fi
-        elif [ "$EFFECTIVE_FAIL_ON" = "fail" ]; then
+        elif [ "$EFFECTIVE_FAIL_ON" = "fail_only" ]; then
           if [ "$CONCLUSION" = "fail" ]; then
             echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
             exit 1
