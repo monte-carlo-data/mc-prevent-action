@@ -18,11 +18,25 @@ inputs:
     default: "https://api.getmontecarlo.com/ci/assess"
   fail-on-error:
     description: >
-      Whether warn and fail verdicts cause the step to exit non-zero.
-      When true (default), warn and fail both show as red in CI.
-      When false, the step always passes — verdict visible in output only.
+      Deprecated — use fail-on instead. Kept for backward compatibility.
+      "true" is equivalent to fail-on: all. "false" is equivalent to fail-on: none.
     required: false
-    default: "true"
+    default: ""
+  fail-on:
+    description: >
+      Which verdicts cause the step to exit non-zero.
+      "all" (default): both warn and fail exit non-zero.
+      "fail": only fail exits non-zero; warnings are informational.
+      "none": the step always passes — verdict visible in output only.
+    required: false
+    default: "all"
+  exempt-tables:
+    description: >
+      Comma-separated list of table names to exclude from the gate
+      evaluation. Assets matching these names will be skipped when
+      computing the verdict. Example: "staging.*, sandbox.scratch_table"
+    required: false
+    default: ""
   poll-interval:
     description: "Seconds between poll attempts when waiting for PR agent assessment."
     required: false
@@ -66,6 +80,8 @@ runs:
         MCD_TOKEN: ${{ inputs.mcd-token }}
         API_URL: ${{ inputs.api-url }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXEMPT_TABLES: ${{ inputs.exempt-tables }}
         POLL_INTERVAL: ${{ inputs.poll-interval }}
         MAX_WAIT: ${{ inputs.max-wait }}
       run: |
@@ -107,7 +123,9 @@ runs:
               --arg repo "$REPO" \
               --argjson pr "$PR_NUMBER" \
               --arg sha "$COMMIT_SHA" \
-              '{repository:$repo, pr_number:$pr, commit_sha:$sha}'
+              --arg exempt "$EXEMPT_TABLES" \
+              '{repository:$repo, pr_number:$pr, commit_sha:$sha}
+              | if $exempt != "" then . + {exempt_tables: ($exempt | split(",") | map(gsub("^\\s+|\\s+$"; "")))} else . end'
             )" 2>/dev/null) || true
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -214,8 +232,22 @@ runs:
           echo "> :warning: Override active via \`mc-override\` label." >> "$GITHUB_STEP_SUMMARY"
         fi
 
-        # Exit 1 on warn or fail
-        if [ "$FAIL_ON_ERROR" = "true" ]; then
+        # Resolve effective fail-on mode.
+        # fail-on takes precedence; fall back to fail-on-error for backward compat.
+        EFFECTIVE_FAIL_ON="$FAIL_ON"
+        if [ -z "$EFFECTIVE_FAIL_ON" ] || [ "$EFFECTIVE_FAIL_ON" = "all" ]; then
+          # Check legacy param
+          if [ "$FAIL_ON_ERROR" = "false" ]; then
+            EFFECTIVE_FAIL_ON="none"
+          elif [ "$FAIL_ON_ERROR" = "true" ]; then
+            EFFECTIVE_FAIL_ON="all"
+          else
+            EFFECTIVE_FAIL_ON="all"
+          fi
+        fi
+
+        # Exit non-zero based on fail-on mode
+        if [ "$EFFECTIVE_FAIL_ON" = "all" ]; then
           if [ "$CONCLUSION" = "fail" ] || [ "$CONCLUSION" = "warn" ]; then
             if [ "$CONCLUSION" = "fail" ]; then
               echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
@@ -224,4 +256,10 @@ runs:
             fi
             exit 1
           fi
+        elif [ "$EFFECTIVE_FAIL_ON" = "fail" ]; then
+          if [ "$CONCLUSION" = "fail" ]; then
+            echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
+            exit 1
+          fi
         fi
+        # fail-on: none — never exit non-zero
