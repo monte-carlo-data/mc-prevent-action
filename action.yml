@@ -37,6 +37,15 @@ inputs:
       computing the verdict. Example: "staging.*, sandbox.scratch_table"
     required: false
     default: ""
+  min-risk-tier:
+    description: >
+      Minimum risk tier to act on. PRs assessed below this tier are
+      treated as pass regardless of the decision matrix.
+      "low" (default): all risk tiers are evaluated.
+      "medium": low-risk PRs are treated as pass.
+      "high": only high-risk PRs are evaluated.
+    required: false
+    default: "low"
   poll-interval:
     description: "Seconds between poll attempts when waiting for PR agent assessment."
     required: false
@@ -82,6 +91,7 @@ runs:
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         FAIL_ON: ${{ inputs.fail-on }}
         EXEMPT_TABLES: ${{ inputs.exempt-tables }}
+        MIN_RISK_TIER: ${{ inputs.min-risk-tier }}
         POLL_INTERVAL: ${{ inputs.poll-interval }}
         MAX_WAIT: ${{ inputs.max-wait }}
       run: |
@@ -124,8 +134,10 @@ runs:
               --argjson pr "$PR_NUMBER" \
               --arg sha "$COMMIT_SHA" \
               --arg exempt "$EXEMPT_TABLES" \
+              --arg min_tier "$MIN_RISK_TIER" \
               '{repository:$repo, pr_number:$pr, commit_sha:$sha}
-              | if $exempt != "" then . + {exempt_tables: ($exempt | split(",") | map(gsub("^\\s+|\\s+$"; "")))} else . end'
+              | if $exempt != "" then . + {exempt_tables: ($exempt | split(",") | map(gsub("^\\s+|\\s+$"; "")))} else . end
+              | if $min_tier != "low" and $min_tier != "" then . + {min_risk_tier: $min_tier} else . end'
             )" 2>/dev/null) || true
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)

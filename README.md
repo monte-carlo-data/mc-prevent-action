@@ -50,6 +50,7 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 | `api-url` | No | `https://api.getmontecarlo.com/ci/assess` | API endpoint URL |
 | `fail-on` | No | `warn_and_fail` | Which verdicts exit non-zero: `warn_and_fail`, `fail_only`, or `none` |
 | `exempt-tables` | No | — | Comma-separated table names to exclude from evaluation |
+| `min-risk-tier` | No | `low` | Minimum risk tier to act on: `low`, `medium`, or `high` |
 | `poll-interval` | No | `30` | Seconds between poll attempts |
 | `max-wait` | No | `300` | Maximum seconds to wait for assessment |
 
@@ -73,6 +74,16 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
     mcd-id: ${{ secrets.MCD_ID }}
     mcd-token: ${{ secrets.MCD_TOKEN }}
     exempt-tables: "staging.*, sandbox.scratch_table"
+```
+
+### Example: only gate on medium and high risk PRs
+
+```yaml
+- uses: monte-carlo-data/mc-prevent-action@v1
+  with:
+    mcd-id: ${{ secrets.MCD_ID }}
+    mcd-token: ${{ secrets.MCD_TOKEN }}
+    min-risk-tier: medium
 ```
 
 ## Outputs
