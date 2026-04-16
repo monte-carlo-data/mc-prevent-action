@@ -113,8 +113,9 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 2. Calls Monte Carlo's `/ci/assess` API with the repo, PR number, and commit SHA
 3. If no assessment is available yet (the PR agent may still be analyzing), waits up to `max-wait` seconds
 4. If a cached verdict from a previous commit exists, reuses it immediately
-5. Displays the verdict and a human-readable summary in the job output and step summary
-6. Raw API response available in a collapsible section
+5. Displays the verdict and a per-asset explanation in the CI job output and step summary
+6. The same explanation and a per-asset verdict table appear on the "MC Prevent CI Gate Result" check run on the PR
+7. Raw API response available in a collapsible section
 
 ### Verdicts
 
@@ -126,7 +127,7 @@ MC Prevent returns one of three verdicts based on the risk assessment:
 | **warn** | Risk detected — review recommended | Red | Green | Green | Grey (neutral) |
 | **fail** | High risk — merge not recommended | Red | Red | Green | Red |
 
-**Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual three-way severity — green for pass, grey for warn, red for fail. If you configure branch protection, require the check run (not the CI job) for accurate gating.
+**Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual three-way severity (green/grey/red) along with a per-asset breakdown table showing each asset's verdict and reason. If you configure branch protection, require the check run (not the CI job) for accurate gating.
 
 ### How the verdict is calculated
 
@@ -152,6 +153,12 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 | `downstream_key_assets` | Key assets (dashboards, critical tables) that depend on this asset |
 
 **Multi-asset PRs:** When a PR affects multiple data assets, each is evaluated independently. The final verdict is the **worst** across all assets — if one asset is `fail` and another is `pass`, the PR verdict is `fail`.
+
+### Understanding the verdict explanation
+
+The CI job output and the check run on the PR both include a per-asset explanation of why the verdict was reached. For each asset that triggered a warn or fail, the explanation describes the change type, downstream exposure, and what to verify. Assets that passed are summarized with their change type and downstream count.
+
+The explanation ends with a sentence justifying the overall conclusion — for example, "Because the breaking change does not affect key downstream assets, the conclusion is warn." This helps you understand why a high-risk PR might get warn instead of fail, or vice versa.
 
 ### What `fail-on` controls
 
