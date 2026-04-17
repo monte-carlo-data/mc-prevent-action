@@ -48,20 +48,42 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 | `mcd-id` | Yes | — | Monte Carlo API Key ID |
 | `mcd-token` | Yes | — | Monte Carlo API Key Token |
 | `api-url` | No | `https://api.getmontecarlo.com/ci/assess` | API endpoint URL |
-| `fail-on-error` | No | `true` | Whether warn/fail verdicts cause the step to exit non-zero |
+| `fail-on` | No | `warn_and_fail` | Which verdicts exit non-zero: `warn_and_fail`, `fail_only`, or `none` |
+| `exempt-tables` | No | — | Comma-separated table names to exclude from evaluation |
+| `min-risk-tier` | No | `low` | Minimum risk tier to act on: `low`, `medium`, or `high` |
 | `poll-interval` | No | `30` | Seconds between poll attempts |
 | `max-wait` | No | `300` | Maximum seconds to wait for assessment |
 
-### Example with custom parameters
+> **Migrating from `fail-on-error`:** `fail-on-error: true` is equivalent to `fail-on: warn_and_fail` (the default). `fail-on-error: false` is equivalent to `fail-on: none`. The `fail-on-error` parameter still works for backward compatibility.
+
+### Example: only block on fail, not warnings
 
 ```yaml
 - uses: monte-carlo-data/mc-prevent-action@v1
   with:
     mcd-id: ${{ secrets.MCD_ID }}
     mcd-token: ${{ secrets.MCD_TOKEN }}
-    fail-on-error: "false"
-    poll-interval: "15"
-    max-wait: "120"
+    fail-on: fail_only
+```
+
+### Example: exclude staging tables
+
+```yaml
+- uses: monte-carlo-data/mc-prevent-action@v1
+  with:
+    mcd-id: ${{ secrets.MCD_ID }}
+    mcd-token: ${{ secrets.MCD_TOKEN }}
+    exempt-tables: "staging.*, sandbox.scratch_table"
+```
+
+### Example: only gate on medium and high risk PRs
+
+```yaml
+- uses: monte-carlo-data/mc-prevent-action@v1
+  with:
+    mcd-id: ${{ secrets.MCD_ID }}
+    mcd-token: ${{ secrets.MCD_TOKEN }}
+    min-risk-tier: medium
 ```
 
 ## Outputs
@@ -91,20 +113,21 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 2. Calls Monte Carlo's `/ci/assess` API with the repo, PR number, and commit SHA
 3. If no assessment is available yet (the PR agent may still be analyzing), waits up to `max-wait` seconds
 4. If a cached verdict from a previous commit exists, reuses it immediately
-5. Displays the verdict and a human-readable summary in the job output and step summary
-6. Raw API response available in a collapsible section
+5. Displays the verdict and a per-asset explanation in the CI job output and step summary
+6. The same explanation and a per-asset verdict table appear on the "MC Prevent CI Gate Result" check run on the PR
+7. Raw API response available in a collapsible section
 
 ### Verdicts
 
 MC Prevent returns one of three verdicts based on the risk assessment:
 
-| Verdict | What it means | CI job behavior (`fail-on-error: true`) | Check run on PR |
-|---|---|---|---|
-| **pass** | No significant risk detected | Job passes (green) | Green |
-| **warn** | Risk detected — review recommended | Job fails (red) | Grey (neutral) |
-| **fail** | High risk — merge not recommended | Job fails (red) | Red |
+| Verdict | What it means | `warn_and_fail` (default) | `fail_only` | `none` | Check run on PR |
+|---|---|---|---|---|---|
+| **pass** | No significant risk detected | Green | Green | Green | Green |
+| **warn** | Risk detected — review recommended | Red | Green | Green | Grey (neutral) |
+| **fail** | High risk — merge not recommended | Red | Red | Green | Red |
 
-**Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual severity — green for pass, grey for warn, red for fail. If you configure branch protection, require the check run (not the CI job) for accurate gating.
+**Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual three-way severity (green/grey/red) along with a per-asset breakdown table showing each asset's verdict and reason. If you configure branch protection, require the check run (not the CI job) for accurate gating.
 
 ### How the verdict is calculated
 
@@ -114,13 +137,11 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 
 | # | Condition | Verdict |
 |---|-----------|---------|
-| 1 | Breaking change AND downstream key assets depend on it | **fail** |
+| 1 | Breaking change AND downstream assets depend on it | **fail** |
 | 2 | Active alerts highly correlated with the change | **fail** |
-| 3 | Breaking change AND no key assets downstream | **warn** |
+| 3 | Breaking change AND no downstream assets | **warn** |
 | 4 | Active alerts exist but low/no correlation with the change | **warn** |
-| 5 | No monitor coverage AND key assets downstream | **warn** |
-| 6 | Additive change, no active alerts | **pass** |
-| 7 | No qualifying data assets identified | **pass** |
+| 5 | Everything else | **pass** |
 
 **Signals used per asset** — provided by the PR agent:
 
@@ -129,17 +150,23 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 | `change_type` | How the asset is affected: `breaking` or `additive` |
 | `alert_correlation` | Whether active alerts are related to the change: `high`, `low`, or `none` |
 | `active_alerts` | Number of unresolved alerts on the asset |
-| `downstream_key_assets` | Key assets (dashboards, critical tables) that depend on this asset |
-| `monitor_coverage_gaps` | Columns or aspects of the asset that have no monitor coverage |
+| `downstream_assets` | Downstream assets (dashboards, tables) that depend on this asset |
 
 **Multi-asset PRs:** When a PR affects multiple data assets, each is evaluated independently. The final verdict is the **worst** across all assets — if one asset is `fail` and another is `pass`, the PR verdict is `fail`.
 
-### What `fail-on-error` controls
+### Understanding the verdict explanation
+
+The CI job output and the check run on the PR both include a per-asset explanation of why the verdict was reached. For each asset that triggered a warn or fail, the explanation describes the change type, downstream exposure, and what to verify. Assets that passed are summarized with their change type and downstream count.
+
+The explanation ends with a sentence justifying the overall conclusion — for example, "Because the breaking change does not affect downstream assets, the conclusion is warn." This helps you understand why a high-risk PR might get warn instead of fail, or vice versa.
+
+### What `fail-on` controls
 
 | Setting | Behavior |
 |---|---|
-| `fail-on-error: true` (default) | Warn and fail both cause the step to exit non-zero (red). This draws attention to risks. |
-| `fail-on-error: false` | The step always passes (green). The verdict is only visible in the job output, step summary, and the check run on the PR. Use this for a silent, non-blocking setup. |
+| `warn_and_fail` (default) | Both warn and fail cause the step to exit non-zero (red). This draws attention to all risks. |
+| `fail_only` | Only fail exits non-zero. Warnings are visible in the step summary and check run but don't break your pipeline. Good for teams that want to focus on critical issues. |
+| `none` | The step always passes (green). The verdict is only visible in the job output, step summary, and the check run on the PR. Use this for a silent, non-blocking setup. |
 
 ### Behavior by setup stage
 
@@ -152,6 +179,31 @@ MC Prevent is designed for progressive adoption — it never blocks your CI due 
 | Secrets configured, PR agent enabled | Pass / Warn / Fail | Full risk verdict based on the PR agent's analysis |
 
 **Tip:** To avoid the polling wait in stage two, enable the PR agent in **Monte Carlo → Settings → AI Agents** before (or shortly after) adding your API credentials.
+
+## Controlling which branches are gated
+
+Use the workflow trigger to control which PRs run MC Prevent. By default, the quick start template runs on PRs targeting `main`:
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+```
+
+To gate additional branches:
+
+```yaml
+on:
+  pull_request:
+    branches: [main, release/*, production]
+```
+
+To run on all PRs (not recommended for high-traffic repos):
+
+```yaml
+on:
+  pull_request:
+```
 
 ## Override
 
@@ -170,7 +222,7 @@ The PR agent posts its assessment when a PR is opened or marked ready for review
 Verify that `MCD_ID` and `MCD_TOKEN` are set correctly as repository secrets.
 
 **CI job shows red but the change is low risk:**
-Check the step output — if the verdict is `warn` (not `fail`), this is expected when `fail-on-error: true`. The check run on the PR will show grey (neutral), not red. Set `fail-on-error: false` if you don't want warnings to fail the CI job.
+Check the step output — if the verdict is `warn` (not `fail`), this is expected when using `fail-on: warn_and_fail` (the default). The check run on the PR will show grey (neutral), not red. Set `fail-on: fail_only` to only block on fail verdicts, or `fail-on: none` if you don't want any verdict to fail the CI job.
 
 ## Resources
 
