@@ -137,9 +137,9 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 
 | # | Condition | Verdict |
 |---|-----------|---------|
-| 1 | Breaking change AND downstream key assets depend on it | **fail** |
+| 1 | Breaking change AND downstream assets depend on it | **fail** |
 | 2 | Active alerts highly correlated with the change | **fail** |
-| 3 | Breaking change AND no key assets downstream | **warn** |
+| 3 | Breaking change AND no downstream assets | **warn** |
 | 4 | Active alerts exist but low/no correlation with the change | **warn** |
 | 5 | Everything else | **pass** |
 
@@ -150,7 +150,7 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 | `change_type` | How the asset is affected: `breaking` or `additive` |
 | `alert_correlation` | Whether active alerts are related to the change: `high`, `low`, or `none` |
 | `active_alerts` | Number of unresolved alerts on the asset |
-| `downstream_key_assets` | Key assets (dashboards, critical tables) that depend on this asset |
+| `downstream_assets` | Downstream assets (dashboards, tables) that depend on this asset |
 
 **Multi-asset PRs:** When a PR affects multiple data assets, each is evaluated independently. The final verdict is the **worst** across all assets — if one asset is `fail` and another is `pass`, the PR verdict is `fail`.
 
@@ -158,7 +158,7 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 
 The CI job output and the check run on the PR both include a per-asset explanation of why the verdict was reached. For each asset that triggered a warn or fail, the explanation describes the change type, downstream exposure, and what to verify. Assets that passed are summarized with their change type and downstream count.
 
-The explanation ends with a sentence justifying the overall conclusion — for example, "Because the breaking change does not affect key downstream assets, the conclusion is warn." This helps you understand why a high-risk PR might get warn instead of fail, or vice versa.
+The explanation ends with a sentence justifying the overall conclusion — for example, "Because the breaking change does not affect downstream assets, the conclusion is warn." This helps you understand why a high-risk PR might get warn instead of fail, or vice versa.
 
 ### What `fail-on` controls
 
