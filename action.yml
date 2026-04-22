@@ -18,34 +18,23 @@ inputs:
     default: "https://api.getmontecarlo.com/ci/assess"
   fail-on-error:
     description: >
-      Deprecated — use fail-on instead. Kept for backward compatibility.
-      "true" is equivalent to fail-on: all. "false" is equivalent to fail-on: none.
+      Deprecated — use fail-on instead.
+      false = fail-on: none.
+      true is a no-op (defers to fail-on).
     required: false
-    default: ""
+    default: "true"
   fail-on:
     description: >
-      Which verdicts cause the step to exit non-zero.
-      "warn_and_fail" (default): both warn and fail exit non-zero.
-      "fail_only": only fail exits non-zero; warnings are informational.
-      "none": the step always passes — verdict visible in output only.
-    required: false
-    default: "warn_and_fail"
-  exempt-tables:
-    description: >
-      Comma-separated list of table names to exclude from the gate
-      evaluation. Assets matching these names will be skipped when
-      computing the verdict. Example: "staging.*, sandbox.scratch_table"
+      Which verdicts cause the job to exit
+      non-zero: warn_and_fail, fail_only,
+      or none. When left as the empty
+      string this parameter is not sent
+      to the backend, and the Monte
+      Carlo UI's fail_on setting applies.
+      Setting any of the three values
+      overrides the UI.
     required: false
     default: ""
-  min-risk-tier:
-    description: >
-      Minimum risk tier to act on. PRs assessed below this tier are
-      treated as pass regardless of the decision matrix.
-      "low" (default): all risk tiers are evaluated.
-      "medium": low-risk PRs are treated as pass.
-      "high": only high-risk PRs are evaluated.
-    required: false
-    default: "low"
   poll-interval:
     description: "Seconds between poll attempts when waiting for PR agent assessment."
     required: false
@@ -90,8 +79,6 @@ runs:
         API_URL: ${{ inputs.api-url }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         FAIL_ON: ${{ inputs.fail-on }}
-        EXEMPT_TABLES: ${{ inputs.exempt-tables }}
-        MIN_RISK_TIER: ${{ inputs.min-risk-tier }}
         POLL_INTERVAL: ${{ inputs.poll-interval }}
         MAX_WAIT: ${{ inputs.max-wait }}
       run: |
@@ -119,13 +106,24 @@ runs:
         CACHE_FILE=".mc-prevent-cache/verdict.json"
         mkdir -p .mc-prevent-cache
 
+        # Resolve effective fail-on before the API call. fail-on is only
+        # sent when the user explicitly sets it — unset means "defer to
+        # UI setting". fail-on-error is a deprecated shim: false → none.
+        EFF="$FAIL_ON"
+        if [ -z "$EFF" ]; then
+          if [ "$FAIL_ON_ERROR" = "false" ] \
+            || [ "$FAIL_ON_ERROR" = "0" ]; then
+            EFF="none"
+          fi
+        fi
+
         echo "PR #${PR_NUMBER} on ${REPO} at commit ${COMMIT_SHA}"
         echo "Retrieving MC Prevent assessment..."
         sleep ${POLL_INTERVAL}
         WAITED=${POLL_INTERVAL}
 
         while true; do
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 25 -X POST "$API_URL" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 45 -X POST "$API_URL" \
             -H "x-mcd-id: $MCD_ID" \
             -H "x-mcd-token: $MCD_TOKEN" \
             -H "Content-Type: application/json" \
@@ -133,11 +131,11 @@ runs:
               --arg repo "$REPO" \
               --argjson pr "$PR_NUMBER" \
               --arg sha "$COMMIT_SHA" \
-              --arg exempt "$EXEMPT_TABLES" \
-              --arg min_tier "$MIN_RISK_TIER" \
+              --arg fail_on "$EFF" \
               '{repository:$repo, pr_number:$pr, commit_sha:$sha}
-              | if $exempt != "" then . + {exempt_tables: ($exempt | split(",") | map(gsub("^\\s+|\\s+$"; "")))} else . end
-              | if $min_tier != "low" and $min_tier != "" then . + {min_risk_tier: $min_tier} else . end'
+              | if $fail_on != "" then
+                  . + {fail_on: $fail_on}
+                else . end'
             )" 2>/dev/null) || true
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -244,34 +242,12 @@ runs:
           echo "> :warning: Override active via \`mc-override\` label." >> "$GITHUB_STEP_SUMMARY"
         fi
 
-        # Resolve effective fail-on mode.
-        # fail-on takes precedence; fall back to fail-on-error for backward compat.
-        EFFECTIVE_FAIL_ON="$FAIL_ON"
-        if [ -z "$EFFECTIVE_FAIL_ON" ] || [ "$EFFECTIVE_FAIL_ON" = "warn_and_fail" ]; then
-          # Check legacy param
-          if [ "$FAIL_ON_ERROR" = "false" ]; then
-            EFFECTIVE_FAIL_ON="none"
-          elif [ "$FAIL_ON_ERROR" = "true" ]; then
-            EFFECTIVE_FAIL_ON="warn_and_fail"
-          else
-            EFFECTIVE_FAIL_ON="warn_and_fail"
-          fi
+        # The backend has already merged CI and UI fail_on and applied
+        # it to the verdict, so we just exit based on the final conclusion.
+        if [ "$CONCLUSION" = "fail" ]; then
+          echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
+          exit 1
+        elif [ "$CONCLUSION" = "warn" ]; then
+          echo "::error::MC Prevent: WARNING. Review the assessment before merging."
+          exit 1
         fi
-
-        # Exit non-zero based on fail-on mode
-        if [ "$EFFECTIVE_FAIL_ON" = "warn_and_fail" ]; then
-          if [ "$CONCLUSION" = "fail" ] || [ "$CONCLUSION" = "warn" ]; then
-            if [ "$CONCLUSION" = "fail" ]; then
-              echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
-            else
-              echo "::error::MC Prevent: WARNING. Review the assessment before merging."
-            fi
-            exit 1
-          fi
-        elif [ "$EFFECTIVE_FAIL_ON" = "fail_only" ]; then
-          if [ "$CONCLUSION" = "fail" ]; then
-            echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
-            exit 1
-          fi
-        fi
-        # fail-on: none — never exit non-zero
