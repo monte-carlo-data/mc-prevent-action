@@ -12,9 +12,9 @@ Go to **Monte Carlo → Settings → API Keys → Create Key**. Save the key ID 
 
 Go to **GitHub repo → Settings → Secrets and variables → Actions → New repository secret**. Add:
 
-| Secret | Value |
-|---|---|
-| `MCD_ID` | Your Monte Carlo API key ID |
+| Secret      | Value                          |
+| ----------- | ------------------------------ |
+| `MCD_ID`    | Your Monte Carlo API key ID    |
 | `MCD_TOKEN` | Your Monte Carlo API key token |
 
 ### 3. Add the workflow
@@ -43,18 +43,16 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 
 ## Parameters
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `mcd-id` | Yes | — | Monte Carlo API Key ID |
-| `mcd-token` | Yes | — | Monte Carlo API Key Token |
-| `api-url` | No | `https://api.getmontecarlo.com/ci/assess` | API endpoint URL |
-| `fail-on` | No | `warn_and_fail` | Which verdicts exit non-zero: `warn_and_fail`, `fail_only`, or `none` |
-| `exempt-tables` | No | — | Comma-separated table names to exclude from evaluation |
-| `min-risk-tier` | No | `low` | Minimum risk tier to act on: `low`, `medium`, or `high` |
-| `poll-interval` | No | `30` | Seconds between poll attempts |
-| `max-wait` | No | `300` | Maximum seconds to wait for assessment |
+| Input           | Required | Default                                   | Description                                                                                                              |
+| --------------- | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mcd-id`        | Yes      | —                                         | Monte Carlo API Key ID                                                                                                   |
+| `mcd-token`     | Yes      | —                                         | Monte Carlo API Key Token                                                                                                |
+| `api-url`       | No       | `https://api.getmontecarlo.com/ci/assess` | API endpoint URL                                                                                                         |
+| `fail-on`       | No       | _(UI setting)_                            | Which verdicts exit non-zero: `warn_and_fail`, `fail_only`, or `none`. When unset, the Monte Carlo UI's setting applies. |
+| `poll-interval` | No       | `30`                                      | Seconds between poll attempts                                                                                            |
+| `max-wait`      | No       | `300`                                     | Maximum seconds to wait for assessment                                                                                   |
 
-> **Migrating from `fail-on-error`:** `fail-on-error: true` is equivalent to `fail-on: warn_and_fail` (the default). `fail-on-error: false` is equivalent to `fail-on: none`. The `fail-on-error` parameter still works for backward compatibility.
+> **Migrating from `fail-on-error`:** `fail-on-error: false` is equivalent to `fail-on: none`. `fail-on-error: true` is a no-op (defers to `fail-on`). The `fail-on-error` parameter still works for backward compatibility.
 
 ### Example: only block on fail, not warnings
 
@@ -66,34 +64,14 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
     fail-on: fail_only
 ```
 
-### Example: exclude staging tables
-
-```yaml
-- uses: monte-carlo-data/mc-prevent-action@v1
-  with:
-    mcd-id: ${{ secrets.MCD_ID }}
-    mcd-token: ${{ secrets.MCD_TOKEN }}
-    exempt-tables: "staging.*, sandbox.scratch_table"
-```
-
-### Example: only gate on medium and high risk PRs
-
-```yaml
-- uses: monte-carlo-data/mc-prevent-action@v1
-  with:
-    mcd-id: ${{ secrets.MCD_ID }}
-    mcd-token: ${{ secrets.MCD_TOKEN }}
-    min-risk-tier: medium
-```
-
 ## Outputs
 
-| Output | Description |
-|---|---|
-| `conclusion` | `pass`, `warn`, or `fail` |
-| `risk-tier` | `high`, `medium`, `low`, or `none` |
+| Output              | Description                                |
+| ------------------- | ------------------------------------------ |
+| `conclusion`        | `pass`, `warn`, or `fail`                  |
+| `risk-tier`         | `high`, `medium`, `low`, or `none`         |
 | `assessment-source` | `pr_agent`, `override`, `none`, or `error` |
-| `response` | Full JSON response |
+| `response`          | Full JSON response                         |
 
 ### Using outputs
 
@@ -121,13 +99,15 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 
 MC Prevent returns one of three verdicts based on the risk assessment:
 
-| Verdict | What it means | `warn_and_fail` (default) | `fail_only` | `none` | Check run on PR |
-|---|---|---|---|---|---|
-| **pass** | No significant risk detected | Green | Green | Green | Green |
-| **warn** | Risk detected — review recommended | Red | Green | Green | Grey (neutral) |
-| **fail** | High risk — merge not recommended | Red | Red | Green | Red |
+| Verdict  | What it means                      | `warn_and_fail` | `fail_only` | `none` | Check run on PR |
+| -------- | ---------------------------------- | --------------- | ----------- | ------ | --------------- |
+| **pass** | No significant risk detected       | Green           | Green       | Green  | Green           |
+| **warn** | Risk detected — review recommended | Red             | Green       | Green  | Grey (neutral)  |
+| **fail** | High risk — merge not recommended  | Red             | Red         | Green  | Red             |
 
 **Note on CI job vs check run:** The CI job can only show green or red. The "MC Prevent CI Gate Result" check run posted on the PR shows the actual three-way severity (green/grey/red) along with a per-asset breakdown table showing each asset's verdict and reason. If you configure branch protection, require the check run (not the CI job) for accurate gating.
+
+**Note on `fail-on` default:** When `fail-on` is not set in the workflow, the backend uses the setting configured in the Monte Carlo UI. This means teams can change the policy from the UI without modifying CI configuration.
 
 ### How the verdict is calculated
 
@@ -135,22 +115,22 @@ MC Prevent receives a risk assessment from the MC PR Agent for each data asset a
 
 **Decision matrix** — rules are evaluated top-to-bottom, first match wins:
 
-| # | Condition | Verdict |
-|---|-----------|---------|
-| 1 | Breaking change AND downstream assets depend on it | **fail** |
-| 2 | Active alerts highly correlated with the change | **fail** |
-| 3 | Breaking change AND no downstream assets | **warn** |
-| 4 | Active alerts exist but low/no correlation with the change | **warn** |
-| 5 | Everything else | **pass** |
+| #   | Condition                                                  | Verdict  |
+| --- | ---------------------------------------------------------- | -------- |
+| 1   | Breaking change AND downstream assets depend on it         | **fail** |
+| 2   | Active alerts highly correlated with the change            | **fail** |
+| 3   | Breaking change AND no downstream assets                   | **warn** |
+| 4   | Active alerts exist but low/no correlation with the change | **warn** |
+| 5   | Everything else                                            | **pass** |
 
 **Signals used per asset** — provided by the PR agent:
 
-| Signal | Description |
-|--------|-------------|
-| `change_type` | How the asset is affected: `breaking` or `additive` |
+| Signal              | Description                                                               |
+| ------------------- | ------------------------------------------------------------------------- |
+| `change_type`       | How the asset is affected: `breaking` or `additive`                       |
 | `alert_correlation` | Whether active alerts are related to the change: `high`, `low`, or `none` |
-| `active_alerts` | Number of unresolved alerts on the asset |
-| `downstream_assets` | Downstream assets (dashboards, tables) that depend on this asset |
+| `active_alerts`     | Number of unresolved alerts on the asset                                  |
+| `downstream_assets` | Downstream assets (dashboards, tables) that depend on this asset          |
 
 **Multi-asset PRs:** When a PR affects multiple data assets, each is evaluated independently. The final verdict is the **worst** across all assets — if one asset is `fail` and another is `pass`, the PR verdict is `fail`.
 
@@ -162,21 +142,22 @@ The explanation ends with a sentence justifying the overall conclusion — for e
 
 ### What `fail-on` controls
 
-| Setting | Behavior |
-|---|---|
-| `warn_and_fail` (default) | Both warn and fail cause the step to exit non-zero (red). This draws attention to all risks. |
-| `fail_only` | Only fail exits non-zero. Warnings are visible in the step summary and check run but don't break your pipeline. Good for teams that want to focus on critical issues. |
-| `none` | The step always passes (green). The verdict is only visible in the job output, step summary, and the check run on the PR. Use this for a silent, non-blocking setup. |
+| Setting         | Behavior                                                                                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(unset)_       | Uses the setting from the Monte Carlo UI (Settings → Integrations → CI Gate). This is the default.                                                                    |
+| `warn_and_fail` | Both warn and fail cause the step to exit non-zero (red). This draws attention to all risks.                                                                          |
+| `fail_only`     | Only fail exits non-zero. Warnings are visible in the step summary and check run but don't break your pipeline. Good for teams that want to focus on critical issues. |
+| `none`          | The step always passes (green). The verdict is only visible in the job output, step summary, and the check run on the PR. Use this for a silent, non-blocking setup.  |
 
 ### Behavior by setup stage
 
 MC Prevent is designed for progressive adoption — it never blocks your CI due to incomplete setup. You can add the workflow file first and configure the remaining pieces at your own pace.
 
-| Setup stage | CI result | What you'll see |
-|---|---|---|
-| Workflow added, secrets not yet configured | Pass (green) | Step skips instantly — no API call is made |
-| Secrets configured, PR agent not yet enabled | Pass (green) | Step polls for up to `max-wait` seconds, then passes with no assessment |
-| Secrets configured, PR agent enabled | Pass / Warn / Fail | Full risk verdict based on the PR agent's analysis |
+| Setup stage                                  | CI result          | What you'll see                                                         |
+| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------- |
+| Workflow added, secrets not yet configured   | Pass (green)       | Step skips instantly — no API call is made                              |
+| Secrets configured, PR agent not yet enabled | Pass (green)       | Step polls for up to `max-wait` seconds, then passes with no assessment |
+| Secrets configured, PR agent enabled         | Pass / Warn / Fail | Full risk verdict based on the PR agent's analysis                      |
 
 **Tip:** To avoid the polling wait in stage two, enable the PR agent in **Monte Carlo → Settings → AI Agents** before (or shortly after) adding your API credentials.
 
@@ -222,7 +203,7 @@ The PR agent posts its assessment when a PR is opened or marked ready for review
 Verify that `MCD_ID` and `MCD_TOKEN` are set correctly as repository secrets.
 
 **CI job shows red but the change is low risk:**
-Check the step output — if the verdict is `warn` (not `fail`), this is expected when using `fail-on: warn_and_fail` (the default). The check run on the PR will show grey (neutral), not red. Set `fail-on: fail_only` to only block on fail verdicts, or `fail-on: none` if you don't want any verdict to fail the CI job.
+Check the step output — if the verdict is `warn` (not `fail`), this is expected when `fail-on` is set to `warn_and_fail` (either explicitly or via the Monte Carlo UI). The check run on the PR will show grey (neutral), not red. Set `fail-on: fail_only` to only block on fail verdicts, or `fail-on: none` if you don't want any verdict to fail the CI job. You can also change this in the Monte Carlo UI under Settings → Integrations → CI Gate.
 
 ## Resources
 
