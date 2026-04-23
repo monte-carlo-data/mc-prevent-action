@@ -90,7 +90,7 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 1. Triggered on pull request events (skips draft PRs, runs on ready for review)
 2. Calls Monte Carlo's `/ci/assess` API with the repo, PR number, and commit SHA
 3. If no assessment is available yet (the PR agent may still be analyzing), waits up to `max-wait` seconds
-4. If a cached verdict from a previous commit exists, reuses it immediately
+4. If the same commit was assessed in a previous CI run, reuses the cached verdict immediately
 5. Displays the verdict and a per-asset explanation in the CI job output and step summary
 6. The same explanation and a per-asset verdict table appear on the "MC Prevent CI Gate Result" check run on the PR
 7. Raw API response available in a collapsible section
@@ -197,7 +197,7 @@ Add the `mc-override` label to your pull request to bypass MC Prevent.
 ## Troubleshooting
 
 **MC Prevent times out with no assessment:**
-The PR agent posts its assessment when a PR is opened or marked ready for review. If you push additional commits, MC Prevent reuses the cached verdict from the initial assessment. If no assessment exists after `max-wait` seconds, the step passes without blocking. This typically means the PR agent is not yet enabled — see the [setup stages](#behavior-by-setup-stage) table above.
+The PR agent posts its assessment when a PR is opened or marked ready for review. Each commit is assessed independently — cached verdicts are scoped to the commit SHA and are not reused across commits. To trigger a fresh assessment on a new commit, comment `mc review` on the PR. If no assessment exists after `max-wait` seconds, the step passes without blocking. This typically means the PR agent is not yet enabled — see the [setup stages](#behavior-by-setup-stage) table above.
 
 **Authentication errors (401):**
 Verify that `MCD_ID` and `MCD_TOKEN` are set correctly as repository secrets.
