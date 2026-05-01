@@ -18,21 +18,29 @@ inputs:
     default: "https://api.getmontecarlo.com/ci/assess"
   fail-on-error:
     description: >
-      Deprecated — use fail-on instead.
-      false = fail-on: none.
-      true is a no-op (defers to fail-on).
+      Deprecated — use block-on instead.
+      false = block-on: none.
+      true is a no-op (defers to block-on).
     required: false
     default: "true"
+  block-on:
+    description: >
+      Which risk tiers cause the job to exit
+      non-zero: low+ (block on low, medium,
+      and high), medium+ (block on medium and
+      high), high+ (block on high only), or
+      none (never block). When left as the
+      empty string this parameter is not sent
+      to the backend, and the Monte Carlo
+      UI setting applies.
+    required: false
+    default: ""
   fail-on:
     description: >
-      Which verdicts cause the job to exit
-      non-zero: warn_and_fail, fail_only,
-      or none. When left as the empty
-      string this parameter is not sent
-      to the backend, and the Monte
-      Carlo UI's fail_on setting applies.
-      Setting any of the three values
-      overrides the UI.
+      Deprecated — use block-on instead.
+      Accepted values: warn_and_fail,
+      fail_only, none. block-on takes
+      precedence when both are set.
     required: false
     default: ""
   poll-interval:
@@ -78,6 +86,7 @@ runs:
         MCD_TOKEN: ${{ inputs.mcd-token }}
         API_URL: ${{ inputs.api-url }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        BLOCK_ON: ${{ inputs.block-on }}
         FAIL_ON: ${{ inputs.fail-on }}
         POLL_INTERVAL: ${{ inputs.poll-interval }}
         MAX_WAIT: ${{ inputs.max-wait }}
@@ -106,10 +115,15 @@ runs:
         CACHE_FILE=".mc-prevent-cache/verdict.json"
         mkdir -p .mc-prevent-cache
 
-        # Resolve effective fail-on before the API call. fail-on is only
-        # sent when the user explicitly sets it — unset means "defer to
-        # UI setting". fail-on-error is a deprecated shim: false → none.
-        EFF="$FAIL_ON"
+        # Resolve effective block-on. Precedence:
+        # 1. block-on (new parameter)
+        # 2. fail-on (deprecated — backward compat)
+        # 3. fail-on-error (deprecated shim: false → none)
+        # When empty, the backend's UI setting applies.
+        EFF="$BLOCK_ON"
+        if [ -z "$EFF" ]; then
+          EFF="$FAIL_ON"
+        fi
         if [ -z "$EFF" ]; then
           if [ "$FAIL_ON_ERROR" = "false" ] \
             || [ "$FAIL_ON_ERROR" = "0" ]; then
@@ -131,10 +145,10 @@ runs:
               --arg repo "$REPO" \
               --argjson pr "$PR_NUMBER" \
               --arg sha "$COMMIT_SHA" \
-              --arg fail_on "$EFF" \
+              --arg block_on "$EFF" \
               '{repository:$repo, pr_number:$pr, commit_sha:$sha}
-              | if $fail_on != "" then
-                  . + {fail_on: $fail_on}
+              | if $block_on != "" then
+                  . + {block_on: $block_on}
                 else . end'
             )" 2>/dev/null) || true
 
@@ -242,7 +256,7 @@ runs:
           echo "> :warning: Override active via \`mc-override\` label." >> "$GITHUB_STEP_SUMMARY"
         fi
 
-        # The backend has already merged CI and UI fail_on and applied
+        # The backend has already merged CI and UI block_on and applied
         # it to the verdict, so we just exit based on the final conclusion.
         if [ "$CONCLUSION" = "fail" ]; then
           echo "::error::MC Prevent: FAIL. Add 'mc-override' label to bypass."
