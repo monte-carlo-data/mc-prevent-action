@@ -51,9 +51,6 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 | `block-on`      | No       | _(UI setting)_                            | Which risk tiers exit non-zero: `low+`, `medium+`, `high+`, or `none`. When unset, the Monte Carlo UI's setting applies. |
 | `poll-interval` | No       | `30`                                      | Seconds between poll attempts                                                                                            |
 | `max-wait`      | No       | `300`                                     | Maximum seconds to wait for assessment                                                                                   |
-
-> **Migrating from `fail-on`:** `fail-on` is deprecated but still works for backward compatibility. `block-on` takes precedence when both are set. Mapping: `warn_and_fail` → `medium+`, `fail_only` → `high+`, `none` → `none`.
-
 ### Example: only block on high-risk PRs
 
 ```yaml
