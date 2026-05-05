@@ -74,9 +74,9 @@ runs:
       id: verdict-cache
       with:
         path: .mc-prevent-cache
-        key: mc-prevent-${{ github.head_ref }}-${{ github.run_id }}
+        key: mc-prevent-${{ github.event.pull_request.head.sha }}
         restore-keys: |
-          mc-prevent-${{ github.head_ref }}-
+          mc-prevent-
 
     - name: "\u26a0\ufe0f MC Prevent"
       id: gate
@@ -168,23 +168,26 @@ runs:
             break
           fi
 
-          # No assessment yet — check if we have a cached verdict from a previous run
-          if [ -f "$CACHE_FILE" ]; then
-            echo "Using cached assessment from previous run."
-            BODY=$(cat "$CACHE_FILE")
-            HTTP_CODE=200
-            SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "cached"')
-            break
-          fi
-
           WAITED=$((WAITED + POLL_INTERVAL))
           if [ "$WAITED" -ge "$MAX_WAIT" ]; then
-            echo "::warning::No assessment available. Defaulting to pass."
+            echo "No assessment available for this commit."
             break
           fi
 
           sleep ${POLL_INTERVAL}
         done
+
+        # If polling found nothing, fall back to cached verdict from a previous commit
+        if [ "$SOURCE" = "none" ] || [ "$SOURCE" = "error" ]; then
+          if [ -f "$CACHE_FILE" ]; then
+            echo "Using cached assessment from previous commit."
+            BODY=$(cat "$CACHE_FILE")
+            HTTP_CODE=200
+            SOURCE=$(echo "$BODY" | jq -r '.assessment_source // "cached"')
+          else
+            echo "::warning::No assessment available and no cached verdict. Defaulting to pass."
+          fi
+        fi
 
         # Parse result
         CONCLUSION=$(echo "$BODY" | jq -r '.conclusion // "error"' 2>/dev/null || echo "error")

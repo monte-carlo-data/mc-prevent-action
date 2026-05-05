@@ -51,11 +51,6 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 | `block-on`      | No       | _(UI setting)_                            | Which risk tiers exit non-zero: `low+`, `medium+`, `high+`, or `none`. When unset, the Monte Carlo UI's setting applies. |
 | `poll-interval` | No       | `30`                                      | Seconds between poll attempts                                                                                            |
 | `max-wait`      | No       | `300`                                     | Maximum seconds to wait for assessment                                                                                   |
-
-> **Migrating from `fail-on`:** `fail-on` is deprecated but still works for backward compatibility. `block-on` takes precedence when both are set. Mapping: `warn_and_fail` → `medium+`, `fail_only` → `high+`, `none` → `none`.
-
-> **Migrating from `fail-on-error`:** `fail-on-error: false` is equivalent to `block-on: none`. `fail-on-error: true` is a no-op (defers to `block-on`). The `fail-on-error` parameter still works for backward compatibility.
-
 ### Example: only block on high-risk PRs
 
 ```yaml
@@ -92,10 +87,9 @@ That's it. MC Prevent runs on every pull request (skips drafts) and reports a ve
 1. Triggered on pull request events (skips draft PRs, runs on ready for review)
 2. Calls Monte Carlo's `/ci/assess` API with the repo, PR number, and commit SHA
 3. If no assessment is available yet (the PR agent may still be analyzing), waits up to `max-wait` seconds
-4. If a cached verdict from a previous commit exists, reuses it immediately
-5. Displays the verdict and a summary in the CI job output and step summary
-6. The same verdict appears on the "MC Prevent CI Gate Result" check run on the PR
-7. Raw API response available in a collapsible section
+4. Displays the verdict and a summary in the CI job output and step summary
+5. The same verdict appears on the "MC Prevent: CI Gate Result" check run on the PR
+6. Raw API response available in a collapsible section
 
 ### Verdicts and `block-on`
 
@@ -151,13 +145,13 @@ on:
 Add the `mc-override` label to your pull request to bypass MC Prevent.
 
 - The verdict returns **pass** regardless of risk
-- The "MC Prevent CI Gate Result" check run on the PR immediately flips to green — no commit or CI re-run needed
+- The "MC Prevent: CI Gate Result" check run on the PR immediately flips to green — no commit or CI re-run needed
 - All overrides are logged for audit
 
 ## Troubleshooting
 
 **MC Prevent times out with no assessment:**
-The PR agent posts its assessment when a PR is opened or marked ready for review. If you push additional commits, MC Prevent reuses the cached verdict from the initial assessment. If no assessment exists after `max-wait` seconds, the step passes without blocking. This typically means the PR agent is not yet enabled — see the [setup stages](#behavior-by-setup-stage) table above.
+MC Prevent waits up to `max-wait` seconds for the PR agent's analysis. If no assessment is available after the wait, the step passes without blocking. This typically means the PR agent is not yet enabled — see the [setup stages](#behavior-by-setup-stage) table above.
 
 **Authentication errors (401):**
 Verify that `MCD_ID` and `MCD_TOKEN` are set correctly as repository secrets.
